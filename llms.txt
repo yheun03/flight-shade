@@ -1,0 +1,21 @@
+# Flight Shade
+
+> Choose a left or right airplane window seat for shade, sunshine, sunrise or sunset.
+
+## App
+- [한국어](https://yheun03.github.io/flight-shade/)
+- [English](https://yheun03.github.io/flight-shade/en/)
+
+## How it works
+- Enter IATA airport codes, the departure airport's local date and time, and flight duration.
+- Select shade, sun, sunrise or sunset. Results update automatically.
+- Sunrise and sunset times use the departure airport's IANA time zone, including daylight saving time.
+- SunCalc solar positions are sampled along a great-circle route at an estimated altitude.
+- Sunrise and sunset seat recommendations use the sun's direction at that event. If there is no event, the app says so.
+- Weather, actual air traffic routing, aircraft attitude and window geometry are not included.
+- Shared query parameters: from, to, date, time, duration, preference.
+
+## Sources
+- [SunCalc 1.9.0](https://github.com/mourner/suncalc/tree/v1.9.0)
+- [Airport coordinates and time zones](https://github.com/mwgg/Airports)
+- [Project](https://github.com/yheun03/flight-shade)
