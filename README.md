@@ -16,10 +16,40 @@ npm run preview
 
 API 키나 별도 서버는 필요하지 않습니다. 좌석 계산과 공항 검색은 브라우저에서 처리합니다. 지도 타일(OpenStreetMap)과 웹 폰트는 인터넷 연결이 필요합니다.
 
+## GitHub Pages 배포
+
+기본 배포 대상은 `https://yheun03.github.io/flight-shade/`입니다. 경로는 저장소의 `origin` 또는 GitHub Actions의 `GITHUB_REPOSITORY`에서 계산하므로 저장소 이름이 바뀌어도 코드에 경로를 고정할 필요가 없습니다.
+
+### 자동 배포 — 권장
+
+1. GitHub 저장소의 **Settings → Pages → Build and deployment → Source**를 **GitHub Actions**로 선택합니다.
+2. 소스를 `main`에 push합니다.
+3. **Actions → Deploy Flight Shade to GitHub Pages**에서 진행 상황을 확인합니다. 수동 실행도 지원합니다.
+
+워크플로는 테스트 후 Pages 전용 빌드를 실행하고 `dist/`를 배포합니다. [Vite의 GitHub Pages 배포 방식](https://vite.dev/guide/static-deploy.html#github-pages)을 따릅니다.
+
+배포 전에 실제 하위 경로로 미리 확인할 수 있습니다.
+
+```sh
+npm run build:pages
+npm run preview:pages
+# http://localhost:4173/flight-shade/
+```
+
+### gh-pages 브랜치로 직접 배포
+
+planearby처럼 로컬에서 직접 배포하려면 다음 명령을 사용합니다. GitHub에 Git push할 수 있는 인증이 필요합니다.
+
+```sh
+npm run deploy
+```
+
+이 방식을 선택한 경우 **Settings → Pages → Source**를 **Deploy from a branch → gh-pages / (root)**로 설정합니다. 자동 배포 워크플로와 직접 배포 중 한 방식을 선택해 사용하세요. `npm run build`와 `npm run dev`는 `/`에서 동작하는 일반 로컬 빌드입니다.
+
 ## 공유 주소
 
 ```text
-/?from=ICN&to=KIX&date=2026-11-07&time=14%3A50&duration=85
+https://yheun03.github.io/flight-shade/?from=ICN&to=KIX&date=2026-11-07&time=14%3A50&duration=85
 ```
 
 - `from`, `to`: IATA 공항 코드
