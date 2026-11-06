@@ -109,7 +109,6 @@ function onKey(event) {
           @keydown="onKey"
         />
         <span v-if="selected && !open">{{ selected.cityLabel }} · {{ selected.nameLabel }}</span>
-        <span v-else-if="!open">공항 코드 또는 도시를 입력하세요</span>
       </div>
       <ChevronDown :size="16" />
     </div>
@@ -120,9 +119,7 @@ function onKey(event) {
       role="listbox"
       :aria-label="`${label} 검색 결과`"
     >
-      <li v-if="!matches.length" class="airport-field__empty">
-        검색 결과가 없어요. IATA 코드로 검색해 보세요.
-      </li>
+      <li v-if="!matches.length" class="airport-field__empty">검색 결과가 없습니다.</li>
       <li
         v-for="(airport, index) in matches"
         :id="`${id}-option-${index}`"

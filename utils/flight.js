@@ -74,6 +74,32 @@ export function sunAt(from, to, departure, duration, fraction) {
   return { ...position, fraction, instant, heading, azimuth, elevation, relative, side }
 }
 
+function findSunEvents(from, to, departure, duration, samples) {
+  const points = [
+    sunAt(from, to, departure, duration, 0),
+    ...samples,
+    sunAt(from, to, departure, duration, 1),
+  ]
+  const events = []
+  for (let i = 1; i < points.length; i++) {
+    const wasNight = points[i - 1].side === 'night'
+    if (wasNight === (points[i].side === 'night')) continue
+
+    // Refine the moving aircraft's horizon crossing, including climb and descent.
+    let before = points[i - 1].fraction
+    let after = points[i].fraction
+    for (let step = 0; step < 20; step++) {
+      const middle = (before + after) / 2
+      const isNight = sunAt(from, to, departure, duration, middle).side === 'night'
+      if (isNight === wasNight) before = middle
+      else after = middle
+    }
+    const crossing = sunAt(from, to, departure, duration, after)
+    events.push({ type: wasNight ? 'sunrise' : 'sunset', ...crossing })
+  }
+  return events
+}
+
 export function calculateFlight({ from, to, date, time, duration }) {
   if (from.code === to.code || distanceKm(from, to) < 1)
     throw new Error('출발 공항과 도착 공항을 다르게 선택해 주세요.')
@@ -109,6 +135,7 @@ export function calculateFlight({ from, to, date, time, duration }) {
     duration,
     departure,
     samples,
+    sunEvents: findSunEvents(from, to, departure, duration, samples),
     percentages,
     recommendation,
     arrival: new Date(departure.getTime() + duration * 60000),

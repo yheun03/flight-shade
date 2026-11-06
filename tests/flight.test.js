@@ -177,3 +177,74 @@ test('scrubbing changes the time and position while preserving flight bounds', (
   assert.equal(last.instant.getTime(), flight.arrival.getTime())
   assert.equal(last.lat, input.to.lat)
 })
+
+test('morning flight marks the airborne sunrise and brackets the horizon crossing', () => {
+  const flight = calculateFlight({ ...input, time: '06:00' })
+  assert.deepEqual(
+    flight.sunEvents.map((event) => event.type),
+    ['sunrise'],
+  )
+  const event = flight.sunEvents[0]
+  const second = 1 / (flight.duration * 60)
+  assert.equal(
+    sunAt(input.from, input.to, flight.departure, flight.duration, event.fraction - second).side,
+    'night',
+  )
+  assert.notEqual(
+    sunAt(input.from, input.to, flight.departure, flight.duration, event.fraction + second).side,
+    'night',
+  )
+  assert.ok(event.instant > flight.departure && event.instant < flight.arrival)
+})
+
+test('evening flight marks sunset while full day and full night flights have no event', () => {
+  const flight = calculateFlight({ ...input, time: '16:00' })
+  assert.deepEqual(
+    flight.sunEvents.map((event) => event.type),
+    ['sunset'],
+  )
+  const event = flight.sunEvents[0]
+  const second = 1 / (flight.duration * 60)
+  assert.notEqual(
+    sunAt(input.from, input.to, flight.departure, flight.duration, event.fraction - second).side,
+    'night',
+  )
+  assert.equal(
+    sunAt(input.from, input.to, flight.departure, flight.duration, event.fraction + second).side,
+    'night',
+  )
+  assert.deepEqual(calculateFlight(input).sunEvents, [])
+  assert.deepEqual(calculateFlight({ ...input, time: '23:00' }).sunEvents, [])
+})
+
+test('Pacific flight can include both sunset and sunrise in chronological order', () => {
+  const flight = calculateFlight({ ...input, to: airport('LAX'), time: '12:00', duration: 720 })
+  assert.deepEqual(
+    flight.sunEvents.map((event) => event.type),
+    ['sunset', 'sunrise'],
+  )
+  assert.ok(flight.sunEvents[0].fraction < flight.sunEvents[1].fraction)
+  for (const event of flight.sunEvents) {
+    assert.ok(event.fraction > 0 && event.fraction < 1)
+    assert.ok(event.instant >= flight.departure && event.instant <= flight.arrival)
+  }
+})
+
+test('shared flight restores sunrise and sunset across local calendar days', () => {
+  const flight = calculateFlight({
+    ...input,
+    from: airport('JFK'),
+    to: airport('LHR'),
+    time: '20:00',
+    duration: 420,
+  })
+  const params = readFlightParams(flightUrl(flight, 'https://example.com/flight-shade/'))
+  const restored = calculateFlight({
+    ...params,
+    from: airport(params.from),
+    to: airport(params.to),
+  })
+  assert.deepEqual(restored.sunEvents, flight.sunEvents)
+  assert.equal(flight.sunEvents[0].type, 'sunrise')
+  assert.equal(flight.sunEvents[0].instant.toISOString().slice(0, 10), '2026-11-08')
+})

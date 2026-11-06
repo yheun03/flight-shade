@@ -8,13 +8,11 @@ dialog {
   overflow: auto;
   overscroll-behavior: contain;
   border: 1px solid var(--border);
-  border-radius: 17px;
+  border-radius: 4px;
   background: var(--page);
   color: var(--text);
-  box-shadow: 0 20px 100px #102a2744;
   &::backdrop {
-    background: #0e211dd1;
-    backdrop-filter: blur(7px);
+    background: #14261bbf;
   }
   h2 {
     margin-top: 16px;
@@ -28,109 +26,47 @@ dialog {
   align-items: center;
   justify-content: space-between;
   gap: 15px;
-  .eyebrow {
-    color: #84936f;
-    font-size: 8px;
-  }
-  .icon-button {
-    margin-top: -8px;
-    margin-right: -7px;
+  h2 {
+    margin: 0;
+    font-size: 22px;
   }
 }
-.dialog-intro {
-  margin-top: 9px;
-  color: var(--text-secondary);
-  font-size: 11px;
-  line-height: 1.8;
-}
-.guide-steps {
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
-  margin: 30px 0 25px;
-  padding: 0;
-  list-style: none;
-  > li {
-    display: flex;
-    align-items: flex-start;
-    gap: 15px;
-    > span {
-      @include flex-center;
-      width: 30px;
-      height: 30px;
-      flex-shrink: 0;
-      border: 1px solid #d5dfc7;
-      border-radius: 50%;
-      color: #7f9765;
-      font-size: 10px;
-    }
-    h3 {
-      margin-top: 5px;
-      font-size: 13px;
-      font-weight: 600;
-    }
-    p {
-      margin-top: 7px;
-      color: var(--text-secondary);
-      font-size: 11px;
-      line-height: 1.9;
-      word-break: keep-all;
-    }
+.guide-details {
+  display: grid;
+  gap: 20px;
+  margin: 28px 0 24px;
+  > div {
+    display: grid;
+    grid-template-columns: 74px minmax(0, 1fr);
+    gap: 16px;
   }
-}
-.guide-note {
-  display: flex;
-  gap: 9px;
-  padding: 14px;
-  margin-bottom: 22px;
-  border-radius: 7px;
-  background: #eaf0e2;
-  color: #7b8f6e;
-  > svg {
-    margin-top: 2px;
+  dt {
+    font-size: 13px;
+    font-weight: 600;
   }
-  > p {
-    font-size: 10px;
-    line-height: 1.9;
+  dd {
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: 13px;
+    line-height: 1.7;
     word-break: keep-all;
   }
 }
-.guide-sources {
-  margin-top: 17px;
-  text-align: center;
-  font-size: 9px;
-  color: var(--text-muted);
-  a {
-    color: #617854;
-    text-decoration: underline;
-    text-underline-offset: 3px;
-  }
+.guide-note {
+  margin: 0;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.7;
 }
 .boarding-pass {
   margin: 24px 0;
   overflow: hidden;
   border: 1px solid #46634c;
-  border-radius: 10px;
+  border-radius: 3px;
   color: #d4e5bf;
-  background: #264336;
-  &__top {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 16px 20px;
-    border-bottom: 1px solid #c1d7a424;
-    > span:first-child {
-      font-size: 14px;
-      font-weight: 650;
-      letter-spacing: -0.5px;
-    }
-    > span:last-child {
-      font-family: $font-mono;
-      font-size: 6px;
-      letter-spacing: 1px;
-      color: #a2ba8c;
-    }
-  }
+  background: var(--accent);
   &__route {
     display: flex;
     align-items: center;
@@ -149,7 +85,7 @@ dialog {
         line-height: 1;
       }
       > span {
-        font-size: 10px;
+        font-size: 12px;
         color: #a6ba96;
       }
     }
@@ -163,12 +99,6 @@ dialog {
     flex-direction: column;
     gap: 8px;
     padding: 0 25px 25px;
-    > span {
-      color: #91aa7d;
-      font-family: $font-mono;
-      font-size: 7px;
-      letter-spacing: 1px;
-    }
     > b {
       display: flex;
       align-items: center;
@@ -185,7 +115,7 @@ dialog {
     gap: 10px;
     padding: 20px 25px;
     border-top: 1px dashed #bfd2a24d;
-    background: #294738;
+    background: #294438;
     &::before,
     &::after {
       content: '';
@@ -206,14 +136,8 @@ dialog {
       display: flex;
       flex-direction: column;
       gap: 6px;
-      > span {
-        font-family: $font-mono;
-        font-size: 6px;
-        letter-spacing: 1px;
-        color: #95b17d;
-      }
       > b {
-        font-size: 11px;
+        font-size: 13px;
         font-weight: 500;
       }
     }
@@ -227,10 +151,10 @@ dialog {
     padding: 0 12px;
     margin-bottom: 14px;
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: 3px;
     color: var(--text-secondary);
     background: #fff;
-    font-size: 10px;
+    font-size: 12px;
   }
   &__native {
     display: flex;
@@ -241,13 +165,13 @@ dialog {
     padding: 14px 10px 0;
     color: #7d8d71;
     background: transparent;
-    font-size: 10px;
+    font-size: 12px;
   }
 }
 @media (max-width: 700px) {
   dialog {
     padding: 24px 21px;
-    border-radius: 13px;
+    border-radius: 4px;
     h2 {
       font-size: 22px;
     }
@@ -255,5 +179,19 @@ dialog {
   .boarding-pass__bottom {
     padding-left: 20px;
     padding-right: 20px;
+  }
+}
+
+.boarding-pass__events {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px 16px;
+  padding: 0 25px 20px;
+  > span {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    color: #e3bc7c;
+    font-size: 11px;
   }
 }

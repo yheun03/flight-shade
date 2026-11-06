@@ -1,23 +1,24 @@
 <script setup>
-import { computed, onBeforeMount, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeMount, onMounted, onUnmounted, ref, watch } from 'vue'
 import {
   ArrowLeft,
   ArrowRight,
-  ArrowUpRight,
   ArrowUpDown,
   Check,
+  ChevronDown,
+  ChevronUp,
   Clock3,
   Copy,
-  Info,
+  CircleHelp,
   Link,
   Moon,
   Pause,
   Plane,
   Play,
   Share2,
-  ShieldCheck,
-  Sparkles,
   Sun,
+  Sunrise,
+  Sunset,
   X,
 } from '@lucide/vue'
 import FlightShadeAircraftIcon from '~/components/projects/flight-shade/FlightShadeAircraftIcon.vue'
@@ -62,6 +63,21 @@ const guideDialog = ref(null)
 const shareDialog = ref(null)
 const sharedUrl = ref('')
 const shareSupported = ref(false)
+const isMobile = ref(false)
+const sheetState = ref('open')
+const sheetDrag = ref(0)
+const sheetDragging = ref(false)
+const flightPanel = ref(null)
+const sheetHandle = ref(null)
+const sheetSummary = ref(null)
+const seatCard = ref(null)
+const mapTopInset = ref(0)
+const sheetOpen = computed(() => isMobile.value && sheetState.value !== 'collapsed')
+let seatObserver,
+  mobileMedia,
+  dragStartY,
+  dragPointer,
+  sheetDragged = false
 let playTimer, toastTimer
 const findAirport = (code) => airports.find((airport) => airport.code === code.trim().toUpperCase())
 const initialFlight = () =>
@@ -73,7 +89,6 @@ const initialFlight = () =>
     duration: 85,
   })
 const flight = ref(initialFlight())
-const fromAirport = computed(() => findAirport(from.value))
 const snapshot = computed(() =>
   sunAt(
     flight.value.from,
@@ -90,20 +105,32 @@ const percentageItems = computed(() => [
   { key: 'night', label: '야간 비행', icon: Moon, value: flight.value.percentages.night },
 ])
 const recommendedSide = computed(() => flight.value.recommendation)
+const sunEvents = computed(() => {
+  const formatter = new Intl.DateTimeFormat('ko-KR', {
+    timeZone: flight.value.from.tz,
+    month: 'long',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  })
+  return flight.value.sunEvents.map((event) => {
+    const name = event.type === 'sunrise' ? '일출' : '일몰'
+    return {
+      ...event,
+      label: `${name} 비행`,
+      icon: event.type === 'sunrise' ? Sunrise : Sunset,
+      time: formatTime(event.instant, flight.value.from.tz),
+      title: `예상 ${name} · ${formatter.format(event.instant)} (출발 공항 현지 시간)`,
+    }
+  })
+})
 const recommendedTitle = computed(() =>
   recommendedSide.value === 'left'
     ? '왼쪽 창가'
     : recommendedSide.value === 'right'
       ? '오른쪽 창가'
       : '양쪽 모두 좋아요',
-)
-const shadePercent = computed(() => 100 - (flight.value.percentages[recommendedSide.value] || 0))
-const recommendationText = computed(() =>
-  flight.value.percentages.night >= 98
-    ? '대부분 밤에 비행해요. 어느 쪽이든 편안하게 쉬어 가세요.'
-    : recommendedSide.value === 'either'
-      ? '양쪽의 햇빛 노출이 비슷해요. 마음에 드는 창가를 골라보세요.'
-      : `비행 중 약 ${shadePercent.value}% 구간에서 이쪽 창가에 직접 들어오는 햇빛이 적어요.`,
 )
 const sunSideText = computed(
   () =>
@@ -113,6 +140,12 @@ const sunSideText = computed(
       front: '태양이 기체 앞·뒤에 있어요',
       night: '지금은 해가 지평선 아래에 있어요',
     })[snapshot.value.side],
+)
+const sunSideLabel = computed(
+  () =>
+    ({ left: '태양 · 왼쪽', right: '태양 · 오른쪽', front: '태양 · 앞·뒤', night: '야간' })[
+      snapshot.value.side
+    ],
 )
 const elapsed = computed(() => Math.round(flight.value.duration * Number(progress.value)))
 const arrivalDate = computed(() =>
@@ -129,7 +162,6 @@ const departureDate = computed(() =>
     day: 'numeric',
   }).format(flight.value.departure),
 )
-const timeZoneLabel = computed(() => fromAirport.value?.tz || '공항을 선택해 주세요')
 
 function notify(message) {
   toast.value = message
@@ -165,6 +197,10 @@ function togglePlaying() {
     if (progress.value >= 1) stopPlaying()
   }, 120)
 }
+function seekSunEvent(event) {
+  stopPlaying()
+  progress.value = event.fraction
+}
 function submitFlight(updateUrl = true) {
   error.value = ''
   try {
@@ -196,13 +232,16 @@ function submitFlight(updateUrl = true) {
     progress.value = 0.25
     if (updateUrl) {
       window.history.pushState({}, '', flightUrl(nextFlight, window.location.href))
-      notify('이 항공편에 맞는 창가 좌석을 찾았어요.')
+      if (isMobile.value) setSheet('collapsed')
     }
     sharedUrl.value = flightUrl(nextFlight, window.location.href)
     document.title = `${origin.code} → ${destination.code} · ${recommendedTitle.value} 추천 | Flight Shade`
     return true
   } catch (cause) {
     error.value = cause.message
+    nextTick(() =>
+      flightPanel.value?.querySelector('.form-error')?.scrollIntoView({ block: 'nearest' }),
+    )
     return false
   }
 }
@@ -221,8 +260,11 @@ function loadFromUrl() {
     time.value = params.time
     hours.value = Math.floor(params.duration / 60)
     minutes.value = params.duration % 60
-    if (!submitFlight(false))
-      notify('공유 정보를 확인해 주세요. 현재 지도에는 기본 항공편이 표시됩니다.')
+    if (!submitFlight(false)) {
+      sheetState.value = 'open'
+    } else if (isMobile.value && readFlightParams(window.location.href)) {
+      sheetState.value = 'collapsed'
+    }
   } catch (cause) {
     error.value = cause.message
   }
@@ -235,11 +277,11 @@ async function copyLink() {
   const url = flightUrl(flight.value, window.location.href)
   try {
     await navigator.clipboard.writeText(url)
-    notify('같은 결과를 볼 수 있는 링크를 복사했어요.')
+    notify('링크를 복사했습니다.')
   } catch {
     sharedUrl.value = url
     if (!shareDialog.value.open) shareDialog.value.showModal()
-    notify('링크를 선택해 직접 복사해 주세요.')
+    notify('링크를 직접 복사해 주세요.')
   }
 }
 async function nativeShare() {
@@ -250,24 +292,123 @@ async function nativeShare() {
       url: sharedUrl.value,
     })
   } catch (cause) {
-    if (cause.name !== 'AbortError') notify('공유 링크를 복사해 사용해 주세요.')
+    if (cause.name !== 'AbortError') notify('링크를 복사해 주세요.')
   }
 }
 function onVisibility() {
   if (document.hidden) stopPlaying()
 }
-onBeforeMount(loadFromUrl)
+
+function setSheet(state) {
+  sheetState.value = state
+  sheetDrag.value = 0
+  if (!isMobile.value) return
+  if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
+  nextTick(() =>
+    (state === 'collapsed' ? sheetSummary.value : sheetHandle.value)?.focus({
+      preventScroll: true,
+    }),
+  )
+}
+function toggleSheet() {
+  if (sheetDragged) {
+    sheetDragged = false
+    return
+  }
+  setSheet(sheetState.value === 'collapsed' ? 'open' : 'collapsed')
+}
+function startSheetDrag(event) {
+  if (!isMobile.value || event.button !== 0) return
+  dragStartY = event.clientY
+  dragPointer = event.pointerId
+  sheetDragged = false
+  sheetDragging.value = true
+  event.currentTarget.setPointerCapture(event.pointerId)
+}
+function moveSheetDrag(event) {
+  if (!sheetDragging.value || event.pointerId !== dragPointer) return
+  const delta = event.clientY - dragStartY
+  if (Math.abs(delta) > 8) sheetDragged = true
+  sheetDrag.value = Math.max(sheetState.value === 'expanded' ? 0 : -300, Math.min(250, delta))
+}
+function endSheetDrag(event) {
+  if (!sheetDragging.value || event.pointerId !== dragPointer) return
+  const delta = event.clientY - dragStartY
+  sheetDragging.value = false
+  sheetDrag.value = 0
+  if (event.type === 'pointercancel' || !sheetDragged) return
+  if (delta < -45) setSheet(sheetState.value === 'collapsed' ? 'open' : 'expanded')
+  if (delta > 45) setSheet(sheetState.value === 'expanded' ? 'open' : 'collapsed')
+}
+function expandForInput(event) {
+  if (isMobile.value && event.target instanceof HTMLInputElement) sheetState.value = 'expanded'
+}
+function onSheetKeydown(event) {
+  if (!sheetOpen.value || document.querySelector('dialog[open]')) return
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    setSheet('collapsed')
+    return
+  }
+  if (event.key !== 'Tab') return
+  const controls = [...flightPanel.value.querySelectorAll('button, input, [tabindex="0"]')].filter(
+    (element) => !element.disabled && element.offsetParent !== null,
+  )
+  const first = controls[0],
+    last = controls[controls.length - 1]
+  if (!flightPanel.value.contains(document.activeElement)) {
+    event.preventDefault()
+    first?.focus()
+  } else if (
+    event.shiftKey &&
+    (document.activeElement === first || document.activeElement === flightPanel.value)
+  ) {
+    event.preventDefault()
+    last?.focus()
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault()
+    first?.focus()
+  }
+}
+function updateViewport() {
+  isMobile.value = mobileMedia.matches
+  document.documentElement.style.setProperty(
+    '--app-height',
+    `${window.visualViewport?.height || window.innerHeight}px`,
+  )
+}
+onBeforeMount(() => {
+  mobileMedia = window.matchMedia('(max-width: 960px)')
+  updateViewport()
+  loadFromUrl()
+})
 onMounted(() => {
   sharedUrl.value = flightUrl(flight.value, window.location.href)
   shareSupported.value = typeof navigator.share === 'function'
   window.addEventListener('popstate', loadFromUrl)
   document.addEventListener('visibilitychange', onVisibility)
+  mobileMedia.addEventListener('change', updateViewport)
+  window.addEventListener('resize', updateViewport)
+  window.visualViewport?.addEventListener('resize', updateViewport)
+  document.addEventListener('keydown', onSheetKeydown)
+  // Keep the route below the result panel as its text and viewport size change.
+  seatObserver = new ResizeObserver(() => {
+    mapTopInset.value = seatCard.value.getBoundingClientRect().height + 64
+  })
+  seatObserver.observe(seatCard.value)
+  if (sheetOpen.value) nextTick(() => flightPanel.value?.focus({ preventScroll: true }))
 })
 onUnmounted(() => {
   stopPlaying()
   clearTimeout(toastTimer)
   window.removeEventListener('popstate', loadFromUrl)
   document.removeEventListener('visibilitychange', onVisibility)
+  mobileMedia?.removeEventListener('change', updateViewport)
+  window.removeEventListener('resize', updateViewport)
+  window.visualViewport?.removeEventListener('resize', updateViewport)
+  document.removeEventListener('keydown', onSheetKeydown)
+  seatObserver?.disconnect()
+  document.documentElement.style.removeProperty('--app-height')
 })
 watch(
   () => flight.value,
@@ -278,170 +419,226 @@ watch(
 </script>
 
 <template>
-  <a class="skip-link" href="#flight-form">항공편 입력으로 건너뛰기</a>
-  <header class="header">
+  <a class="skip-link" href="#flight-form" @click="isMobile && setSheet('expanded')"
+    >항공편 입력으로 건너뛰기</a
+  >
+  <header class="header" :inert="sheetOpen">
     <a class="wordmark" href="./" aria-label="Flight Shade 홈"
       ><span class="wordmark__icon"><FlightShadeAircraftIcon /></span>flight<span>shade</span
       ><span class="wordmark__dot">.</span></a
     >
     <nav class="header__nav" aria-label="주 메뉴">
-      <span class="header__tagline">A little less sun. A better flight.</span
-      ><button type="button" @click="guideDialog.showModal()">
-        이용 안내 <ArrowUpRight :size="15" />
+      <button
+        type="button"
+        aria-label="이용 안내"
+        title="이용 안내"
+        @click="guideDialog.showModal()"
+      >
+        <CircleHelp :size="21" />
       </button>
     </nav>
   </header>
 
   <main class="dashboard">
-    <section class="intro" aria-labelledby="page-title">
-      <div>
-        <p class="eyebrow"><span /> YOUR WINDOW TO A COMFORTABLE FLIGHT</p>
-        <h1 id="page-title">설레는 비행, <span>햇빛 걱정 없이.</span></h1>
-        <p class="intro__description">
-          비행 내내 더 편안한 쪽. 내 항공편의 그늘진 창가를 찾아보세요.
-        </p>
-      </div>
-      <div class="intro__note">
-        <span class="intro__note-icon"><Sun :size="24" /></span>
-        <p>좋은 여행은<br /><b>좋은 자리에서 시작되니까.</b></p>
-        <span class="intro__note-line" />
-      </div>
-    </section>
-
+    <h1 class="sr-only">비행 그늘 좌석 추천</h1>
     <div class="workspace">
-      <aside class="flight-panel">
-        <form id="flight-form" class="flight-form" @submit.prevent="submitFlight()">
-          <div class="flight-form__heading">
-            <span class="eyebrow">LET'S FIND YOUR SIDE</span
-            ><span class="flight-form__step mono">01 / 02</span>
-          </div>
-          <h2>어디로 떠나시나요?</h2>
-          <p class="flight-form__description">항공편 정보를 입력해 주세요.</p>
-          <div class="flight-form__airports">
-            <FlightShadeAirportInput
-              id="from-airport"
-              v-model="from"
-              label="출발 공항"
-              :airports="airports"
-              @select="setEstimate"
-            />
-            <button
-              type="button"
-              class="flight-form__swap"
-              aria-label="출발 공항과 도착 공항 바꾸기"
-              title="출발·도착 바꾸기"
-              @click="swapAirports"
+      <button
+        v-if="sheetOpen"
+        type="button"
+        class="sheet-backdrop"
+        aria-hidden="true"
+        tabindex="-1"
+        @click="setSheet('collapsed')"
+      />
+      <aside
+        ref="flightPanel"
+        class="flight-panel"
+        :tabindex="sheetOpen ? -1 : undefined"
+        :class="[`flight-panel--${sheetState}`, { 'is-dragging': sheetDragging }]"
+        :style="{ '--sheet-drag': `${sheetDrag}px` }"
+        :role="sheetOpen ? 'dialog' : undefined"
+        :aria-modal="sheetOpen ? true : undefined"
+        aria-label="비행 경로 설정"
+      >
+        <button
+          ref="sheetHandle"
+          type="button"
+          class="flight-panel__handle"
+          :aria-label="sheetState === 'collapsed' ? '경로 설정 펼치기' : '경로 설정 접기'"
+          :aria-expanded="sheetState !== 'collapsed'"
+          aria-controls="flight-panel-body"
+          @pointerdown="startSheetDrag"
+          @pointermove="moveSheetDrag"
+          @pointerup="endSheetDrag"
+          @pointercancel="endSheetDrag"
+          @click="toggleSheet"
+        >
+          <span />
+        </button>
+        <button
+          ref="sheetSummary"
+          type="button"
+          class="flight-panel__summary"
+          :aria-expanded="sheetState !== 'collapsed'"
+          aria-controls="flight-panel-body"
+          @click="toggleSheet"
+        >
+          <div v-if="sheetState === 'collapsed'">
+            <strong class="mono"
+              >{{ flight.from.code }} <ArrowRight :size="18" /> {{ flight.to.code }}</strong
             >
-              <ArrowUpDown :size="16" />
-            </button>
-            <FlightShadeAirportInput
-              id="to-airport"
-              v-model="to"
-              label="도착 공항"
-              :airports="airports"
-              @select="setEstimate"
-            />
+            <span
+              >{{ departureDate }} · {{ flight.time }} · {{ formatDuration(flight.duration) }}</span
+            >
           </div>
-          <div class="flight-form__rule" />
-          <div class="flight-form__dates">
-            <div class="field">
-              <label for="departure-date" class="field-label">출발 날짜</label>
-              <div class="field__control">
-                <input
-                  id="departure-date"
-                  v-model="date"
-                  type="date"
-                  min="2000-01-01"
-                  max="2100-12-31"
+          <div v-else><strong>경로 설정</strong></div>
+          <span class="flight-panel__summary-action"
+            >{{ sheetState === 'collapsed' ? '경로 변경' : '접기'
+            }}<ChevronUp v-if="sheetState === 'collapsed'" :size="16" /><ChevronDown
+              v-else
+              :size="16"
+          /></span>
+        </button>
+        <div
+          id="flight-panel-body"
+          class="flight-panel__body"
+          :inert="isMobile && sheetState === 'collapsed'"
+          :aria-hidden="isMobile && sheetState === 'collapsed' ? true : undefined"
+          @focusin="expandForInput"
+        >
+          <form id="flight-form" class="flight-form" @submit.prevent="submitFlight()">
+            <h2>경로 설정</h2>
+            <div class="flight-form__airports">
+              <FlightShadeAirportInput
+                id="from-airport"
+                v-model="from"
+                label="출발 공항"
+                :airports="airports"
+                @select="setEstimate"
+              />
+              <button
+                type="button"
+                class="flight-form__swap"
+                aria-label="출발 공항과 도착 공항 바꾸기"
+                title="출발·도착 바꾸기"
+                @click="swapAirports"
+              >
+                <ArrowUpDown :size="16" />
+              </button>
+              <FlightShadeAirportInput
+                id="to-airport"
+                v-model="to"
+                label="도착 공항"
+                :airports="airports"
+                @select="setEstimate"
+              />
+            </div>
+            <div class="flight-form__rule" />
+            <div class="flight-form__dates">
+              <div class="field">
+                <label for="departure-date" class="field-label">출발 날짜</label>
+                <div class="field__control">
+                  <input
+                    id="departure-date"
+                    v-model="date"
+                    type="date"
+                    min="2000-01-01"
+                    max="2100-12-31"
+                    required
+                  />
+                </div>
+              </div>
+              <div class="field">
+                <label for="departure-time" class="field-label">출발 시간 (현지)</label>
+                <div class="field__control">
+                  <input id="departure-time" v-model="time" type="time" required />
+                </div>
+              </div>
+            </div>
+            <div class="field flight-form__duration">
+              <label for="duration-hours" class="field-label">비행시간</label>
+              <div class="duration-input">
+                <Clock3 :size="16" /><input
+                  id="duration-hours"
+                  v-model="hours"
+                  type="number"
+                  min="0"
+                  max="24"
                   required
-                />
+                  aria-label="비행시간 시"
+                /><span>시간</span
+                ><input
+                  id="duration-minutes"
+                  v-model="minutes"
+                  type="number"
+                  min="0"
+                  max="59"
+                  required
+                  aria-label="비행시간 분"
+                /><span>분</span>
               </div>
             </div>
-            <div class="field">
-              <label for="departure-time" class="field-label">출발 시간</label>
-              <div class="field__control">
-                <input id="departure-time" v-model="time" type="time" required />
-              </div>
-            </div>
-          </div>
-          <p class="flight-form__timezone">
-            <Info :size="12" />출발 공항 현지 시간 기준<span>{{ timeZoneLabel }}</span>
-          </p>
-          <div class="field flight-form__duration">
-            <label for="duration-hours" class="field-label"
-              >비행시간 <span>예상 시간 · 직접 수정 가능</span></label
-            >
-            <div class="duration-input">
-              <Clock3 :size="16" /><input
-                id="duration-hours"
-                v-model="hours"
-                type="number"
-                min="0"
-                max="24"
-                required
-                aria-label="비행시간 시"
-              /><span>시간</span
-              ><input
-                id="duration-minutes"
-                v-model="minutes"
-                type="number"
-                min="0"
-                max="59"
-                required
-                aria-label="비행시간 분"
-              /><span>분</span>
-            </div>
-          </div>
-          <p v-if="error" class="form-error" role="alert">{{ error }}</p>
-          <button class="primary-button flight-form__submit" type="submit">
-            <Sparkles :size="17" />그늘 좌석 찾기<ArrowRight :size="18" />
+            <p v-if="error" class="form-error" role="alert">{{ error }}</p>
+          </form>
+        </div>
+        <div class="flight-panel__footer" :inert="isMobile && sheetState === 'collapsed'">
+          <button class="primary-button flight-form__submit" type="submit" form="flight-form">
+            <Sun :size="17" />그늘 좌석 찾기<ArrowRight :size="18" />
           </button>
-          <p class="flight-form__hint"><ShieldCheck :size="13" />로그인 없이, 가볍게 확인하세요.</p>
-        </form>
-        <div class="flight-tip">
-          <span class="flight-tip__icon"><Sun :size="19" /></span>
-          <div>
-            <b>같은 노선도, 시간에 따라 달라져요.</b>
-            <p>
-              태양은 움직이니까요. 출발 시간을 바꾸면<br class="desktop-break" />
-              추천하는 좌석도 달라질 수 있어요.
-            </p>
-          </div>
         </div>
       </aside>
 
-      <section class="flight-view" aria-label="좌석 추천 결과">
+      <section class="flight-view" aria-label="좌석 추천 결과" :inert="sheetOpen">
         <div class="flight-view__map-area">
-          <FlightShadeMap :flight="flight" :snapshot="snapshot" />
+          <FlightShadeMap
+            :flight="flight"
+            :snapshot="snapshot"
+            :mobile="isMobile"
+            :top-inset="mapTopInset"
+          />
           <article
+            ref="seatCard"
             class="seat-card"
             :class="{ 'seat-card--either': recommendedSide === 'either' }"
+            aria-label="추천 좌석"
             aria-live="polite"
             aria-atomic="true"
           >
-            <div class="seat-card__top">
-              <span><span class="live-dot" /> YOUR SHADY SIDE</span
-              ><span class="seat-card__badge">추천 좌석</span>
+            <div class="seat-card__recommendation">
+              <h2>
+                <ArrowLeft v-if="recommendedSide === 'left'" :size="33" /><ArrowRight
+                  v-else-if="recommendedSide === 'right'"
+                  :size="33"
+                /><Check v-else :size="29" />{{ recommendedTitle }}
+              </h2>
+              <div v-if="sunEvents.length" class="seat-card__events">
+                <button
+                  v-for="event in sunEvents"
+                  :key="event.instant.getTime()"
+                  type="button"
+                  :class="`is-${event.type}`"
+                  :title="event.title"
+                  :aria-label="event.title"
+                  @click="seekSunEvent(event)"
+                >
+                  <component :is="event.icon" :size="14" /><span>{{ event.label }}</span>
+                  <time class="mono" :datetime="event.instant.toISOString()">{{ event.time }}</time>
+                </button>
+              </div>
             </div>
-            <p class="seat-card__eyebrow">이번 비행은 이쪽이에요</p>
-            <h2>
-              <ArrowLeft v-if="recommendedSide === 'left'" :size="33" /><ArrowRight
-                v-else-if="recommendedSide === 'right'"
-                :size="33"
-              /><Check v-else :size="29" />{{ recommendedTitle }}
-            </h2>
-            <p class="seat-card__description">{{ recommendationText }}</p>
             <div class="seat-diagram" aria-label="기체 진행 방향을 바라볼 때의 좌우 좌석">
-              <span class="seat-diagram__direction">진행 방향 <ArrowUpRight :size="11" /></span>
               <div
                 class="seat-diagram__side"
                 :class="{
                   'is-recommended': recommendedSide === 'left' || recommendedSide === 'either',
                 }"
               >
-                <span v-for="i in 5" :key="i" /><b>{{
-                  recommendedSide === 'left' || recommendedSide === 'either' ? '✓ 왼쪽' : '왼쪽'
-                }}</b>
+                <span v-for="i in 5" :key="i" /><b
+                  ><Check
+                    v-if="recommendedSide === 'left' || recommendedSide === 'either'"
+                    :size="10"
+                  />왼쪽</b
+                >
               </div>
               <FlightShadeAircraftIcon class="seat-diagram__plane" />
               <div
@@ -450,11 +647,12 @@ watch(
                   'is-recommended': recommendedSide === 'right' || recommendedSide === 'either',
                 }"
               >
-                <span v-for="i in 5" :key="i" /><b>{{
-                  recommendedSide === 'right' || recommendedSide === 'either'
-                    ? '✓ 오른쪽'
-                    : '오른쪽'
-                }}</b>
+                <span v-for="i in 5" :key="i" /><b
+                  ><Check
+                    v-if="recommendedSide === 'right' || recommendedSide === 'either'"
+                    :size="10"
+                  />오른쪽</b
+                >
               </div>
               <Sun
                 v-if="flight.percentages.right > flight.percentages.left"
@@ -479,30 +677,25 @@ watch(
             </div>
           </article>
           <div class="flight-view__live">
-            <span class="live-dot" /><span>{{ sunSideText }}</span
+            <component :is="snapshot.side === 'night' ? Moon : Sun" :size="14" /><span>{{
+              sunSideLabel
+            }}</span
             ><span class="mono">{{ formatTime(snapshot.instant, flight.from.tz) }}</span>
           </div>
         </div>
 
         <div class="flight-timeline">
-          <div class="flight-timeline__top">
-            <span><Clock3 :size="13" />시간에 따른 태양 위치</span
-            ><span class="flight-timeline__elapsed mono"
-              >{{ elapsed }}분 / {{ flight.duration }}분</span
-            >
-          </div>
-          <div class="flight-timeline__player">
+          <div
+            class="flight-timeline__player"
+            :class="{ 'flight-timeline__player--events': sunEvents.length }"
+          >
             <button
               type="button"
               class="flight-timeline__play"
               :aria-label="playing ? '비행 시뮬레이션 일시정지' : '비행 시뮬레이션 재생'"
               @click="togglePlaying"
             >
-              <Pause v-if="playing" :size="15" fill="currentColor" /><Play
-                v-else
-                :size="15"
-                fill="currentColor"
-              />
+              <Pause v-if="playing" :size="15" /><Play v-else :size="15" />
             </button>
             <div class="flight-timeline__track">
               <div class="flight-timeline__segments" aria-hidden="true">
@@ -511,6 +704,20 @@ watch(
                   :key="index"
                   :class="`is-${sample.side}`"
                 />
+              </div>
+              <div v-if="sunEvents.length" class="flight-timeline__events">
+                <button
+                  v-for="event in sunEvents"
+                  :key="event.instant.getTime()"
+                  type="button"
+                  :class="`is-${event.type}`"
+                  :style="{ left: `${event.fraction * 100}%` }"
+                  :title="event.title"
+                  :aria-label="`${event.title} 시점으로 이동`"
+                  @click="seekSunEvent(event)"
+                >
+                  <component :is="event.icon" :size="15" />
+                </button>
               </div>
               <input
                 v-model="progress"
@@ -523,12 +730,13 @@ watch(
                 @input="stopPlaying"
               />
             </div>
-            <Sun :size="17" class="flight-timeline__sun" />
+            <span class="flight-timeline__elapsed mono" aria-label="비행 경과 시간"
+              >{{ elapsed }} / {{ flight.duration }}분</span
+            >
           </div>
           <div class="route-summary">
-            <div>
-              <span>DEPARTURE</span
-              ><b class="mono"
+            <div role="group" aria-label="출발">
+              <b class="mono"
                 >{{ flight.from.code }}<small>{{ flight.from.cityLabel }}</small></b
               >
               <p>{{ departureDate }} · {{ formatTime(flight.departure, flight.from.tz) }}</p>
@@ -538,40 +746,22 @@ watch(
               <div><i /><Plane :size="17" /><i /></div>
               <span>{{ flight.distance.toLocaleString() }} km</span>
             </div>
-            <div class="route-summary__arrival">
-              <span>ARRIVAL</span
-              ><b class="mono"
+            <div class="route-summary__arrival" role="group" aria-label="도착">
+              <b class="mono"
                 >{{ flight.to.code }}<small>{{ flight.to.cityLabel }}</small></b
               >
               <p>{{ arrivalDate }} · {{ formatTime(flight.arrival, flight.to.tz) }}</p>
             </div>
           </div>
-          <p class="flight-timeline__note">출발·도착 시간은 각 공항의 현지 시간입니다.</p>
         </div>
       </section>
     </div>
-
-    <div class="below-workspace">
-      <p>
-        <Info :size="13" />대권 경로와 태양 위치에 따른 예상 결과로, 실제 항로·날씨·기체 구조에 따라
-        달라질 수 있어요.
-      </p>
-      <button type="button" @click="guideDialog.showModal()">
-        어떻게 계산하나요? <ArrowUpRight :size="14" />
-      </button>
-    </div>
   </main>
-
-  <footer class="footer">
-    <span>© 2026 Flight Shade</span><span>Chase the journey, not the sun. <Sun :size="13" /></span
-    ><a href="https://github.com/yheun03/planearby" target="_blank" rel="noopener"
-      >Inspired by Planearby <ArrowUpRight :size="12"
-    /></a>
-  </footer>
 
   <dialog
     ref="guideDialog"
     class="guide-dialog"
+    aria-labelledby="guide-title"
     @click="
       (event) => {
         if (event.target === guideDialog) guideDialog.close()
@@ -579,8 +769,8 @@ watch(
     "
   >
     <div class="dialog-heading">
-      <span class="eyebrow">A LITTLE GUIDE</span
-      ><button
+      <h2 id="guide-title">이용 안내</h2>
+      <button
         type="button"
         class="icon-button"
         aria-label="이용 안내 닫기"
@@ -589,64 +779,31 @@ watch(
         <X :size="20" />
       </button>
     </div>
-    <h2>창가에 앉기 전, 알아두세요.</h2>
-    <p class="dialog-intro">좌석을 고르는 작은 기준이 되어드릴게요.</p>
-    <ol class="guide-steps">
-      <li>
-        <span class="mono">01</span>
-        <div>
-          <h3>공항과 출발 시간을 입력해요.</h3>
-          <p>
-            IATA 공항 코드 또는 도시 이름으로 검색하세요. 출발 시간은 출발 공항의 현지 시간이며
-            서머타임도 반영합니다. 서머타임 종료로 반복되는 시간은 먼저 도래하는 시간을 사용합니다.
-          </p>
-        </div>
-      </li>
-      <li>
-        <span class="mono">02</span>
-        <div>
-          <h3>비행 경로를 따라 해를 확인해요.</h3>
-          <p>
-            최단 대권 경로의 240개 구간에서 태양의 방위각·고도를 계산합니다. 고도 약 10.7km에서
-            보이는 지평선과 출발·도착 시 상승·하강을 근사해 야간을 구분합니다.
-          </p>
-        </div>
-      </li>
-      <li>
-        <span class="mono">03</span>
-        <div>
-          <h3>햇빛이 더 적은 쪽을 추천해요.</h3>
-          <p>
-            기수가 향하는 방향을 볼 때 왼쪽과 오른쪽입니다. 숫자는 전체 비행시간 중 태양이 각 방향에
-            있는 비율입니다. 태양이 기체 앞·뒤 15° 안에 있으면 앞·뒤 햇빛으로 분류합니다.
-          </p>
-        </div>
-      </li>
-    </ol>
-    <div class="guide-note">
-      <Info :size="17" />
-      <p>
-        실제 운항 항로, 구름, 기체 기울기와 창문 위치는 반영하지 않은 예상 결과입니다. 비행시간은
-        거리로 추정하므로 실제 예약 항공편의 시간으로 수정하면 더 잘 맞아요.
-      </p>
-    </div>
-    <button class="primary-button" type="button" @click="guideDialog.close()">
-      알겠어요 <Check :size="16" />
-    </button>
-    <p class="guide-sources">
-      계산
-      <a href="https://github.com/mourner/suncalc/tree/v1.9.0" target="_blank" rel="noopener"
-        >SunCalc</a
-      >
-      · 공항
-      <a href="https://github.com/mwgg/Airports" target="_blank" rel="noopener">mwgg/Airports</a> ·
-      참고 <a href="https://flightside.app/" target="_blank" rel="noopener">FlightSide</a>
-    </p>
+    <dl class="guide-details">
+      <div>
+        <dt>출발 시간</dt>
+        <dd>출발 공항의 현지 시간 기준</dd>
+      </div>
+      <div>
+        <dt>좌우 방향</dt>
+        <dd>기수가 향하는 방향 기준</dd>
+      </div>
+      <div>
+        <dt>햇빛 비율</dt>
+        <dd>전체 비행 중 각 방향에 해가 있는 비율</dd>
+      </div>
+      <div>
+        <dt>일출·일몰</dt>
+        <dd>출발 공항 현지 시간 기준</dd>
+      </div>
+    </dl>
+    <p class="guide-note">실제 항로·날씨에 따라 결과가 달라질 수 있습니다.</p>
   </dialog>
 
   <dialog
     ref="shareDialog"
     class="share-dialog"
+    aria-labelledby="share-title"
     @click="
       (event) => {
         if (event.target === shareDialog) shareDialog.close()
@@ -654,8 +811,8 @@ watch(
     "
   >
     <div class="dialog-heading">
-      <span class="eyebrow">YOUR FLIGHT, YOUR SIDE</span
-      ><button
+      <h2 id="share-title">결과 공유</h2>
+      <button
         type="button"
         class="icon-button"
         aria-label="결과 공유 닫기"
@@ -664,12 +821,7 @@ watch(
         <X :size="20" />
       </button>
     </div>
-    <h2>좋은 자리를 함께 나눠요.</h2>
-    <p class="dialog-intro">이 링크를 열면 같은 항공편과 추천 결과를 볼 수 있어요.</p>
     <div class="boarding-pass">
-      <div class="boarding-pass__top">
-        <span>flight shade.</span><span>SEAT RECOMMENDATION</span>
-      </div>
       <div class="boarding-pass__route">
         <div>
           <b class="mono">{{ flight.from.code }}</b
@@ -682,28 +834,41 @@ watch(
         </div>
       </div>
       <div class="boarding-pass__seat">
-        <span>YOUR SHADY SIDE</span><b>{{ recommendedTitle }} <ArrowUpRight :size="20" /></b>
+        <b
+          >{{ recommendedTitle
+          }}<ArrowLeft v-if="recommendedSide === 'left'" :size="20" /><ArrowRight
+            v-else-if="recommendedSide === 'right'"
+            :size="20" /><Check v-else :size="20"
+        /></b>
+      </div>
+      <div v-if="sunEvents.length" class="boarding-pass__events">
+        <span v-for="event in sunEvents" :key="event.instant.getTime()" :title="event.title">
+          <component :is="event.icon" :size="15" />{{ event.label }}
+          <time class="mono" :datetime="event.instant.toISOString()">{{ event.time }}</time>
+        </span>
       </div>
       <div class="boarding-pass__bottom">
-        <div>
-          <span>DEPARTURE · LOCAL</span><b>{{ flight.date }} · {{ flight.time }}</b>
+        <div aria-label="출발 현지 시간">
+          <b>{{ flight.date }} · {{ flight.time }}</b>
         </div>
-        <div>
-          <span>DURATION</span><b>{{ formatDuration(flight.duration) }}</b>
+        <div aria-label="비행시간">
+          <b>{{ formatDuration(flight.duration) }}</b>
         </div>
       </div>
     </div>
-    <label class="field-label" for="share-url">공유 링크</label
+    <label class="sr-only" for="share-url">공유 링크</label
     ><input
       id="share-url"
       class="share-dialog__url mono"
       :value="sharedUrl"
       readonly
       @focus="(event) => event.target.select()"
-    /><button type="button" class="primary-button" @click="copyLink">
-      <Copy :size="16" />링크 복사하기</button
-    ><button v-if="shareSupported" type="button" class="share-dialog__native" @click="nativeShare">
-      <Share2 :size="15" />다른 앱으로 공유하기
+    />
+    <button type="button" class="primary-button" @click="copyLink">
+      <Copy :size="16" />링크 복사
+    </button>
+    <button v-if="shareSupported" type="button" class="share-dialog__native" @click="nativeShare">
+      <Share2 :size="15" />다른 앱으로 공유
     </button>
   </dialog>
   <Transition name="toast"

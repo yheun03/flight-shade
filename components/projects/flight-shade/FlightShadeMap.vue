@@ -1,6 +1,6 @@
 <script setup>
-import { onMounted, onUnmounted, ref, watch } from 'vue'
-import { Focus, Minus, Plus, Navigation } from '@lucide/vue'
+import { h, onMounted, onUnmounted, ref, render, watch } from 'vue'
+import { Focus, Minus, Plus, Navigation, Plane, Sun, Moon } from '@lucide/vue'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { routePoint } from '~/utils/geo.js'
@@ -8,20 +8,24 @@ import { routePoint } from '~/utils/geo.js'
 const props = defineProps({
   flight: { type: Object, required: true },
   snapshot: { type: Object, required: true },
+  mobile: { type: Boolean, default: false },
+  topInset: { type: Number, default: 0 },
 })
 const container = ref(null)
 const tileError = ref(false)
 let map, routeLayer, aircraft, sunlight, sunlightLine, observer
-const planePath =
-  'M16 2c-1.1 0-1.7 1.8-1.9 3.5l-.6 6L3 18v2.5l10-3-.4 7.2-3.6 3v1.8l7-1.9 7 1.9v-1.8l-3.6-3-.4-7.2 10 3V18l-10.5-6.5-.6-6C17.7 3.8 17.1 2 16 2Z'
+const markerIcons = {}
 let path = []
 
 function fitRoute() {
   if (!map || !path.length) return
-  const wide = container.value.clientWidth > 720
+  const wide = !props.mobile
   map.fitBounds(L.latLngBounds(path), {
-    paddingTopLeft: [55, wide ? 95 : 80],
-    paddingBottomRight: [wide ? 355 : 55, 80],
+    paddingTopLeft: [
+      wide ? 45 : 34,
+      wide ? 65 : Math.max(0, Math.min(props.topInset || 250, container.value.clientHeight - 115)),
+    ],
+    paddingBottomRight: [wide ? (window.innerWidth <= 1150 ? 290 : 345) : 35, 65],
     maxZoom: 7,
     animate: false,
   })
@@ -40,12 +44,9 @@ function drawRoute() {
     previous = longitude
     return [Math.max(-85, Math.min(85, point.lat)), longitude]
   })
-  L.polyline(path, { color: '#d7e9b5', weight: 8, opacity: 0.08, interactive: false }).addTo(
-    routeLayer,
-  )
   L.polyline(path, {
-    color: '#cce5a3',
-    weight: 2,
+    color: '#d8d7b5',
+    weight: 2.5,
     opacity: 0.95,
     dashArray: '5 7',
     interactive: false,
@@ -56,9 +57,9 @@ function drawRoute() {
   ]) {
     L.circleMarker(path[index], {
       radius: 5,
-      color: '#d3e6ac',
+      color: '#f3f1e9',
       weight: 2,
-      fillColor: '#233d35',
+      fillColor: '#213c33',
       fillOpacity: 1,
     })
       .addTo(routeLayer)
@@ -82,7 +83,7 @@ function drawPosition() {
     className: 'map-aircraft',
     iconSize: [42, 42],
     iconAnchor: [21, 21],
-    html: `<svg viewBox="0 0 32 32" style="transform:rotate(${point.heading}deg)" aria-hidden="true"><path d="${planePath}"/></svg>`,
+    html: `<span style="transform:rotate(${point.heading - 45}deg)">${markerIcons.plane}</span>`,
   })
   if (!aircraft)
     aircraft = L.marker(position, {
@@ -103,13 +104,11 @@ function drawPosition() {
     className: `map-sun${isNight ? ' is-night' : ''}`,
     iconSize: [44, 44],
     iconAnchor: [22, 22],
-    html: isNight
-      ? '<span>☾</span>'
-      : '<svg viewBox="0 0 40 40" aria-hidden="true"><g stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M20 2v5M20 33v5M2 20h5M33 20h5M7.3 7.3l3.5 3.5M29.2 29.2l3.5 3.5M7.3 32.7l3.5-3.5M29.2 10.8l3.5-3.5"/></g><circle cx="20" cy="20" r="8" fill="currentColor"/></svg>',
+    html: isNight ? markerIcons.moon : markerIcons.sun,
   })
   if (!sunlight) {
     sunlightLine = L.polyline([position, sunPosition], {
-      color: '#efba68',
+      color: '#de9c42',
       weight: 1,
       dashArray: '3 6',
       opacity: 0.6,
@@ -124,6 +123,13 @@ function drawPosition() {
   }
 }
 onMounted(() => {
+  // Leaflet markers use static HTML; render the same Lucide components once.
+  for (const [name, icon] of Object.entries({ plane: Plane, sun: Sun, moon: Moon })) {
+    const element = document.createElement('div')
+    render(h(icon, { size: 32, strokeWidth: 1.75, 'aria-hidden': true }), element)
+    markerIcons[name] = element.innerHTML
+    render(null, element)
+  }
   map = L.map(container.value, {
     zoomControl: false,
     scrollWheelZoom: false,
@@ -152,6 +158,8 @@ onMounted(() => {
   drawRoute()
 })
 watch(() => props.flight, drawRoute)
+watch(() => props.mobile, fitRoute)
+watch(() => props.topInset, fitRoute)
 watch(() => props.snapshot, drawPosition)
 onUnmounted(() => {
   observer?.disconnect()
@@ -167,15 +175,8 @@ onUnmounted(() => {
       role="region"
       aria-label="비행 경로와 태양 방향 지도"
     />
-    <div class="flight-map__heading">
-      <span class="live-dot" /> FLIGHT EXPLORER <span class="flight-map__divider" /> 비행 경로
-    </div>
     <div class="flight-map__compass" aria-label="지도 위쪽은 북쪽">
-      <Navigation :size="16" fill="currentColor" /><span>N</span>
-    </div>
-    <div class="flight-map__legend">
-      <span class="flight-map__route-key" />예상 비행 경로<span class="flight-map__sun-key" />태양
-      방향
+      <Navigation :size="16" /><span>N</span>
     </div>
     <div class="flight-map__controls">
       <button
@@ -194,8 +195,6 @@ onUnmounted(() => {
         <Minus :size="18" />
       </button>
     </div>
-    <p v-if="tileError" class="flight-map__error" role="status">
-      지도 배경을 불러오지 못했습니다. 좌석 추천과 경로 계산은 정상 작동합니다.
-    </p>
+    <p v-if="tileError" class="flight-map__error" role="status">지도를 불러오지 못했습니다.</p>
   </div>
 </template>

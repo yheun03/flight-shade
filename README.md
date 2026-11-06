@@ -16,6 +16,19 @@ npm run preview
 
 API 키나 별도 서버는 필요하지 않습니다. 좌석 계산과 공항 검색은 브라우저에서 처리합니다. 지도 타일(OpenStreetMap)과 웹 폰트는 인터넷 연결이 필요합니다.
 
+## 화면 구성
+
+한 페이지 안에서 경로 설정·지도·추천 결과·공유를 사용합니다. 데스크톱은 지도 옆에 입력 패널을 고정하고, 960px 이하에서는 경로 설정을 바텀 시트로 표시합니다.
+
+- 첫 진입: 중간 높이로 열림. 공유 URL로 진입하면 결과를 바로 볼 수 있도록 접힘.
+- 조회 완료: 출도착 공항·출발 시간 요약 바로 접힘.
+- 조작: 요약 바 클릭과 핸들 드래그로 열고 접기, Esc로 접기. 입력에 포커스하면 시트 확장.
+- 시트 내부만 스크롤하며 제출 버튼은 하단에 고정. 모바일 키보드의 가시 영역과 하단 안전 영역 반영.
+
+Wanted Sans와 Space Grotesk, 종이색·포레스트·앰버를 사용하며 주요 정보와 기능을 중심으로 구성합니다.
+
+비행 중 일출·일몰이 발생하면 Lucide 아이콘과 예상 시각을 표시합니다. 배지나 타임라인 표시를 선택하면 해당 시점으로 이동합니다. 시각은 출발 공항의 현지 시간 기준이며 공유 URL에서도 같은 결과가 복원됩니다.
+
 ## GitHub Pages 배포
 
 기본 배포 대상은 `https://yheun03.github.io/flight-shade/`입니다. 경로는 저장소의 `origin` 또는 GitHub Actions의 `GITHUB_REPOSITORY`에서 계산하므로 저장소 이름이 바뀌어도 코드에 경로를 고정할 필요가 없습니다.
@@ -79,14 +92,17 @@ tests/flight.test.js               좌우 방향·야간·서머타임·URL·날
 
 최단 대권 경로를 240개 동일 시간 구간으로 나누어 SunCalc 1.9.0으로 태양 고도와 방위를 계산합니다. 해당 지점의 기체 진행 방위와 비교해 왼쪽·오른쪽·앞뒤·야간으로 분류합니다. 앞뒤는 기수·꼬리 방향 각각 15도 이내입니다. 약 10.7km 순항 고도의 지평선 하강각과 대기 굴절을 근사하며, 비행 시작·끝 15% 구간은 상승·하강으로 근사합니다. 좌우 노출 차이가 2% 미만이면 양쪽을 추천합니다.
 
+경로 샘플의 주야 전환을 찾고, 이동 좌표와 근사 고도의 지평선 통과 시점을 이분 탐색으로 보정해 일출·일몰을 표시합니다.
+
 실제 항로·운항 속도·구름·기체 자세·창문 구조는 반영하지 않습니다. 비행시간 자동 추정은 거리/780km/h + 20분을 5분 단위로 반올림한 값이므로 실제 일정으로 수정할 수 있습니다. 수치는 전체 비행 구간 중 태양 방향의 비율이며 실제 창문을 통과하는 일사량 측정값은 아닙니다.
 
 ## 데이터와 참고
 
 - UI·경험 참고: [FlightSide](https://flightside.app/)
-- 구조·항공기 아이콘 참고: [planearby](https://github.com/yheun03/planearby)
+- 구조 참고: [planearby](https://github.com/yheun03/planearby)
 - 공항 데이터: [mwgg/Airports](https://github.com/mwgg/Airports), 2026-11-06 다운로드. 유효한 IATA 코드·좌표·IANA 시간대를 가진 중복 없는 7,917개 항목을 포함합니다. [MIT 라이선스](public/licenses/airports-MIT.txt)
+- 아이콘: Lucide (`@lucide/vue`), [ISC 라이선스](public/licenses/lucide-ISC.txt)
 - 태양 위치: [SunCalc 1.9.0](https://github.com/mourner/suncalc/tree/v1.9.0), BSD-2-Clause
 - 지도: [Leaflet](https://leafletjs.com/), [OpenStreetMap](https://www.openstreetmap.org/copyright). [타일 이용 정책](https://operations.osmfoundation.org/policies/tiles/)을 따릅니다. 대규모 서비스로 운영할 때는 사용량에 맞는 타일 공급자를 선택하세요.
 
-계산 결과는 URL에만 포함되며 계정·DB·쿠키에 저장하지 않습니다. 지도 공급자는 화면에 표시할 지역의 타일 좌표를, Google Fonts는 폰트 요청을 받습니다.
+계산 결과는 URL에만 포함되며 계정·DB·쿠키에 저장하지 않습니다. 지도 공급자는 화면에 표시할 지역의 타일 좌표를, Google Fonts와 jsDelivr는 폰트 요청을 받습니다.
