@@ -1,6 +1,12 @@
 import SunCalc from 'suncalc'
 import { bearingDegrees, normalizeDegrees, routePoint, distanceKm } from './geo.js'
 
+export const FLIGHT_PREFERENCES = ['shade', 'sun', 'sunrise', 'sunset']
+
+function inputError(code, message) {
+  return Object.assign(new Error(message), { code })
+}
+
 function localParts(date, timeZone) {
   return Object.fromEntries(
     new Intl.DateTimeFormat('en-GB', {
@@ -22,11 +28,11 @@ function localParts(date, timeZone) {
 // Repeated DST hours use the earlier occurrence; skipped local hours are rejected.
 export function departureInstant(date, time, timeZone) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(time))
-    throw new Error('출발 날짜와 시간을 확인해 주세요.')
+    throw inputError('invalidDate', '출발 날짜와 시간을 확인해 주세요.')
   const requested = `${date}T${time}`
   const wall = new Date(`${requested}:00Z`)
   if (!Number.isFinite(wall.getTime()) || wall.toISOString().slice(0, 16) !== requested)
-    throw new Error('올바른 출발 날짜와 시간을 입력해 주세요.')
+    throw inputError('invalidDate', '올바른 출발 날짜와 시간을 입력해 주세요.')
   const offsets = new Set()
   for (const hours of [-36, -12, 0, 12, 36]) {
     const instant = new Date(wall.getTime() + hours * 3600000)
@@ -44,7 +50,8 @@ export function departureInstant(date, time, timeZone) {
     })
     .sort((a, b) => a - b)
   if (!matches.length)
-    throw new Error(
+    throw inputError(
+      'skippedTime',
       '이 시간은 현지 서머타임 전환으로 존재하지 않습니다. 다른 시간을 선택해 주세요.',
     )
   return matches[0]
@@ -95,16 +102,27 @@ function findSunEvents(from, to, departure, duration, samples) {
       else after = middle
     }
     const crossing = sunAt(from, to, departure, duration, after)
-    events.push({ type: wasNight ? 'sunrise' : 'sunset', ...crossing })
+    const angle = (crossing.relative * Math.PI) / 180
+    const viewSide =
+      Math.abs(Math.sin(angle)) < Math.sin((15 * Math.PI) / 180)
+        ? Math.cos(angle) >= 0
+          ? 'front'
+          : 'back'
+        : crossing.relative < 180
+          ? 'right'
+          : 'left'
+    events.push({ type: wasNight ? 'sunrise' : 'sunset', ...crossing, viewSide })
   }
   return events
 }
 
-export function calculateFlight({ from, to, date, time, duration }) {
+export function calculateFlight({ from, to, date, time, duration, preference = 'shade' }) {
+  if (!FLIGHT_PREFERENCES.includes(preference))
+    throw inputError('invalidPreference', '좌석 선호를 다시 선택해 주세요.')
   if (from.code === to.code || distanceKm(from, to) < 1)
-    throw new Error('출발 공항과 도착 공항을 다르게 선택해 주세요.')
+    throw inputError('sameAirport', '출발 공항과 도착 공항을 다르게 선택해 주세요.')
   if (!Number.isInteger(duration) || duration < 15 || duration > 1440)
-    throw new Error('비행시간은 15분에서 24시간 사이로 입력해 주세요.')
+    throw inputError('invalidDuration', '비행시간은 15분에서 24시간 사이로 입력해 주세요.')
   const departure = departureInstant(date, time, from.tz)
   const samples = Array.from({ length: 240 }, (_, i) =>
     sunAt(from, to, departure, duration, (i + 0.5) / 240),
@@ -121,12 +139,24 @@ export function calculateFlight({ from, to, date, time, duration }) {
   for (const key of remainders) {
     if (remaining-- > 0) percentages[key]++
   }
-  const recommendation =
+  const sunEvents = findSunEvents(from, to, departure, duration, samples)
+  const targetEvent = sunEvents.find((event) => event.type === preference) || null
+  let recommendation =
     Math.abs(counts.left - counts.right) < samples.length * 0.02
       ? 'either'
       : counts.left < counts.right
         ? 'left'
         : 'right'
+  if (preference === 'sun' && recommendation !== 'either') {
+    recommendation = recommendation === 'left' ? 'right' : 'left'
+  }
+  if (preference === 'sunrise' || preference === 'sunset') {
+    recommendation = !targetEvent
+      ? 'none'
+      : ['left', 'right'].includes(targetEvent.viewSide)
+        ? targetEvent.viewSide
+        : 'either'
+  }
   return {
     from,
     to,
@@ -135,7 +165,9 @@ export function calculateFlight({ from, to, date, time, duration }) {
     duration,
     departure,
     samples,
-    sunEvents: findSunEvents(from, to, departure, duration, samples),
+    sunEvents,
+    preference,
+    targetEvent,
     percentages,
     recommendation,
     arrival: new Date(departure.getTime() + duration * 60000),
@@ -151,6 +183,9 @@ export function flightUrl(flight, currentUrl) {
     date: flight.date,
     time: flight.time,
     duration: String(flight.duration),
+    ...(flight.preference && flight.preference !== 'shade'
+      ? { preference: flight.preference }
+      : {}),
   }).toString()
   url.hash = ''
   return url.href
@@ -161,20 +196,28 @@ export function readFlightParams(currentUrl) {
   const keys = ['from', 'to', 'date', 'time', 'duration']
   if (!keys.some((key) => url.searchParams.has(key))) return null
   if (!keys.every((key) => url.searchParams.get(key)))
-    throw new Error('공유 주소에 항공편 정보가 빠져 있습니다. 아래에서 다시 입력해 주세요.')
+    throw inputError(
+      'missingParams',
+      '공유 주소에 항공편 정보가 빠져 있습니다. 아래에서 다시 입력해 주세요.',
+    )
+  const preference = url.searchParams.get('preference')
+  if (preference && !FLIGHT_PREFERENCES.includes(preference))
+    throw inputError('invalidPreference', '좌석 선호를 다시 선택해 주세요.')
   const duration = url.searchParams.get('duration')
-  if (!/^\d+$/.test(duration)) throw new Error('공유 주소의 비행시간이 올바르지 않습니다.')
+  if (!/^\d+$/.test(duration))
+    throw inputError('invalidDuration', '공유 주소의 비행시간이 올바르지 않습니다.')
   return {
     from: url.searchParams.get('from').toUpperCase(),
     to: url.searchParams.get('to').toUpperCase(),
     date: url.searchParams.get('date'),
     time: url.searchParams.get('time'),
     duration: Number(duration),
+    ...(preference ? { preference } : {}),
   }
 }
 
-export function formatTime(date, timeZone) {
-  return new Intl.DateTimeFormat('ko-KR', {
+export function formatTime(date, timeZone, language = 'ko') {
+  return new Intl.DateTimeFormat(language === 'en' ? 'en-GB' : 'ko-KR', {
     timeZone,
     hour: '2-digit',
     minute: '2-digit',
@@ -182,6 +225,8 @@ export function formatTime(date, timeZone) {
   }).format(date)
 }
 
-export function formatDuration(minutes) {
+export function formatDuration(minutes, language = 'ko') {
+  if (language === 'en')
+    return `${Math.floor(minutes / 60)}h${minutes % 60 ? ` ${minutes % 60}m` : ''}`
   return `${Math.floor(minutes / 60)}시간${minutes % 60 ? ` ${minutes % 60}분` : ''}`
 }

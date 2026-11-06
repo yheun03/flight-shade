@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 import {
   calculateFlight,
   departureInstant,
+  FLIGHT_PREFERENCES,
   flightUrl,
   readFlightParams,
   sunAt,
@@ -247,4 +248,89 @@ test('shared flight restores sunrise and sunset across local calendar days', () 
   assert.deepEqual(restored.sunEvents, flight.sunEvents)
   assert.equal(flight.sunEvents[0].type, 'sunrise')
   assert.equal(flight.sunEvents[0].instant.toISOString().slice(0, 10), '2026-11-08')
+})
+
+test('sun preference reverses the shade recommendation while keeping the same solar calculation', () => {
+  const shade = calculateFlight(input)
+  const sun = calculateFlight({ ...input, preference: 'sun' })
+  assert.equal(sun.recommendation, 'right')
+  assert.deepEqual(sun.percentages, shade.percentages)
+  assert.deepEqual(sun.sunEvents, shade.sunEvents)
+  assert.equal(
+    calculateFlight({ ...input, time: '23:00', preference: 'sun' }).recommendation,
+    'either',
+  )
+})
+
+test('sunrise and sunset preferences use the direction at the selected event', () => {
+  const sunrise = calculateFlight({
+    ...input,
+    to: airport('CJU'),
+    time: '06:00',
+    preference: 'sunrise',
+  })
+  assert.equal(sunrise.targetEvent.type, 'sunrise')
+  assert.equal(sunrise.targetEvent.viewSide, 'left')
+  assert.equal(sunrise.recommendation, 'left')
+  const sunset = calculateFlight({ ...input, time: '16:00', preference: 'sunset' })
+  assert.equal(sunset.targetEvent.type, 'sunset')
+  assert.equal(sunset.targetEvent.viewSide, 'right')
+  assert.equal(sunset.recommendation, 'right')
+})
+
+test('a sunrise ahead or behind does not invent a left or right window recommendation', () => {
+  const front = calculateFlight({ ...input, time: '06:00', preference: 'sunrise' })
+  const back = calculateFlight({
+    ...input,
+    from: input.to,
+    to: input.from,
+    time: '06:00',
+    preference: 'sunrise',
+  })
+  assert.equal(front.targetEvent.viewSide, 'front')
+  assert.equal(back.targetEvent.viewSide, 'back')
+  assert.equal(front.recommendation, 'either')
+  assert.equal(back.recommendation, 'either')
+})
+
+test('flights without the requested sunrise or sunset have no recommendation for that event', () => {
+  for (const preference of ['sunrise', 'sunset']) {
+    const flight = calculateFlight({ ...input, preference })
+    assert.equal(flight.recommendation, 'none')
+    assert.equal(flight.targetEvent, null)
+  }
+})
+
+test('all preferences round-trip through English share URLs and restore their result', () => {
+  for (const preference of FLIGHT_PREFERENCES) {
+    const flight = calculateFlight({ ...input, time: '16:00', preference })
+    const url = flightUrl(flight, 'https://example.com/flight-shade/en/')
+    const params = readFlightParams(url)
+    const restored = calculateFlight({
+      ...params,
+      from: airport(params.from),
+      to: airport(params.to),
+    })
+    assert.equal(new URL(url).pathname, '/flight-shade/en/')
+    assert.equal(restored.preference, preference)
+    assert.equal(restored.recommendation, flight.recommendation)
+    assert.deepEqual(restored.targetEvent, flight.targetEvent)
+  }
+})
+
+test('invalid preferences and other validation errors expose translatable codes', () => {
+  assert.throws(() => calculateFlight({ ...input, preference: 'invalid' }), {
+    code: 'invalidPreference',
+  })
+  assert.throws(
+    () =>
+      readFlightParams(
+        `${flightUrl(calculateFlight(input), 'https://example.com/')}&preference=invalid`,
+      ),
+    { code: 'invalidPreference' },
+  )
+  assert.throws(() => calculateFlight({ ...input, duration: 0 }), { code: 'invalidDuration' })
+  assert.throws(() => departureInstant('2026-03-08', '02:30', 'America/New_York'), {
+    code: 'skippedTime',
+  })
 })

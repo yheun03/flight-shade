@@ -31,6 +31,8 @@ jobs:
         run: npm test
       - name: Build for repository path
         run: npm run build:pages
+      - name: Verify localized static pages
+        run: npm run check:build
       - name: Configure Pages
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6
       - name: Upload build

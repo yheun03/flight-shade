@@ -3,14 +3,20 @@ import { h, onMounted, onUnmounted, ref, render, watch } from 'vue'
 import { Focus, Minus, Plus, Navigation, Plane, Sun, Moon } from '@lucide/vue'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
+import '~/assets/scss/projects/flight-shade/_map.scss'
 import { routePoint } from '~/utils/geo.js'
+import { translate } from '~/i18n/index.js'
 
 const props = defineProps({
   flight: { type: Object, required: true },
   snapshot: { type: Object, required: true },
   mobile: { type: Boolean, default: false },
   topInset: { type: Number, default: 0 },
+  language: { type: String, default: 'ko' },
 })
+const t = (key, values) => translate(props.language, key, values)
+const city = (airport) =>
+  props.language === 'en' ? airport.city || airport.name : airport.cityLabel
 const container = ref(null)
 const tileError = ref(false)
 let map, routeLayer, aircraft, sunlight, sunlightLine, observer
@@ -63,7 +69,7 @@ function drawRoute() {
       fillOpacity: 1,
     })
       .addTo(routeLayer)
-      .bindTooltip(`${airport.code} · ${airport.cityLabel}`, {
+      .bindTooltip(`${airport.code} · ${city(airport)}`, {
         permanent: true,
         direction: index === 0 ? 'top' : 'bottom',
         className: 'map-airport-label',
@@ -157,7 +163,8 @@ onMounted(() => {
   observer.observe(container.value)
   drawRoute()
 })
-watch(() => props.flight, drawRoute)
+watch(() => `${props.flight.from.code}:${props.flight.to.code}`, drawRoute)
+watch(() => props.language, drawRoute)
 watch(() => props.mobile, fitRoute)
 watch(() => props.topInset, fitRoute)
 watch(() => props.snapshot, drawPosition)
@@ -173,28 +180,23 @@ onUnmounted(() => {
       ref="container"
       class="flight-map__canvas"
       role="region"
-      aria-label="비행 경로와 태양 방향 지도"
+      :aria-label="t('mapLabel', { from: props.flight.from.code, to: props.flight.to.code })"
     />
-    <div class="flight-map__compass" aria-label="지도 위쪽은 북쪽">
+    <div class="flight-map__compass" :aria-label="t('north')">
       <Navigation :size="16" /><span>N</span>
     </div>
     <div class="flight-map__controls">
-      <button
-        type="button"
-        aria-label="전체 비행 경로 보기"
-        title="전체 경로 보기"
-        @click="fitRoute"
-      >
+      <button type="button" :aria-label="t('fitRoute')" :title="t('fitRoute')" @click="fitRoute">
         <Focus :size="18" />
       </button>
       <span />
-      <button type="button" aria-label="지도 확대" @click="map?.zoomIn()">
+      <button type="button" :aria-label="t('zoomIn')" @click="map?.zoomIn()">
         <Plus :size="18" />
       </button>
-      <button type="button" aria-label="지도 축소" @click="map?.zoomOut()">
+      <button type="button" :aria-label="t('zoomOut')" @click="map?.zoomOut()">
         <Minus :size="18" />
       </button>
     </div>
-    <p v-if="tileError" class="flight-map__error" role="status">지도를 불러오지 못했습니다.</p>
+    <p v-if="tileError" class="flight-map__error" role="status">{{ t('mapFailed') }}</p>
   </div>
 </template>
